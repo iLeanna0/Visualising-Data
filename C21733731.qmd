@@ -1,0 +1,350 @@
+---
+title: "Visualising Data Assignment"
+author: "Ileana Toufekoula - C21733731, TU858/4"
+format:
+  html:
+    code-tools: true
+    css: "./styles.css"
+    code-copy: true
+    code-fold: true
+    self-contained: true
+    toc: true
+editor: visual
+---
+
+## Big Idea
+
+"Do smoking and gender inequality contribute to the life expectancy gap between men and women?"
+
+In this project, I will explore the global difference in life expectancy between men and women — a gap that exists in nearly every country. While it’s well known that women tend to live longer than men, the size of this gap varies widely across regions and time.
+
+To answer this, we combine and analyze datasets on:
+
+The Gender Inequality Index (GII)
+
+The difference in life expectancy between females and males at birth
+
+The smoking rate gap between men and women across countries
+
+## Setting up the Libraries
+
+```{r}
+if (!require("tidyverse")) install.packages("tidyverse", dependencies = TRUE)
+if (!require("plotly")) install.packages("plotly", dependencies = TRUE)
+if (!require("gganimate")) install.packages("gganimate")
+if (!require("ggthemes")) install.packages("ggthemes")
+if (!require("ggcorrplot")) install.packages("ggcorrplot")
+if (!require("countrycode")) install.packages("countrycode")
+if (!require("rnaturalearth")) install.packages("rnaturalearth")
+if (!require("rnaturalearthdata")) install.packages("rnaturalearthdata")
+
+library(tidyverse)
+library(plotly)
+library(gganimate)
+library(ggthemes)
+library(ggcorrplot)
+library(countrycode)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(sf)
+```
+
+## Set up path to the data and load it into dataframes:
+
+```{r}
+# Setup path to the data 
+mydata <- file.path("C:", "Users", "Johnny P", "Downloads")
+datapath1 <- file.path(mydata,'gender-inequality-index-from-the-human-development-report.csv')
+datapath2 <- file.path(mydata,'difference-in-female-and-male-life-expectancy-at-birth.csv')
+datapath3 <- file.path(mydata,'comparing-the-share-of-men-and-women-who-are-smoking.csv')
+
+#Load it into the dataframe 
+gii_data <- read.csv(datapath1)
+life_expectancy_data <- read.csv(datapath2)
+smoking_data <- read.csv(datapath3)
+```
+
+## Data Preparation & Merging:
+
+To begin the analysis, I combined data from 3 different sources:
+
+**Gender Inequality Index (GII)** dataset
+
+**Life expectancy gap** dataset (difference between female and male life expectancy at birth)
+
+**Smoking rates** dataset (percentage of adult males and females who smoke)
+
+Only data from 2008 onwards was included, as this is the time range that best overlaps the three sources, and certain columns were renamed for clarity and readability.
+
+```{r}
+colnames(gii_data)
+colnames(life_expectancy_data)
+colnames(smoking_data)
+
+life_expectancy_data <- life_expectancy_data %>%
+  filter(Year >= 2008)
+
+merged_data <- inner_join(life_expectancy_data, gii_data, by = c("Entity", "Code", "Year"))
+
+merged_data <- merged_data %>%
+  rename(
+    Life_Expectancy_Diff = Life.expectancy.difference..f.m.,
+    GII = Gender.Inequality.Index
+  )
+
+smoking_data <- smoking_data %>%
+  rename(
+    Smoking_Male = `Prevalence.of.current.tobacco.use..males....of.male.adults.`,
+    Smoking_Female = `Prevalence.of.current.tobacco.use..females....of.female.adults.`
+  ) %>%
+  select(Entity, Code, Year, Smoking_Male, Smoking_Female)
+
+# Merge with existing dataset
+merged_data <- merged_data %>%
+  left_join(smoking_data, by = c("Entity", "Code", "Year")) %>%
+  mutate(Smoking_Gap = Smoking_Male - Smoking_Female)
+
+head(merged_data)
+
+```
+
+## Interactive Multi Time Series Plot
+
+```{r}
+#top GII countries
+top_gii_countries <- c("Papua New Guinea", "Yemen")
+
+data_long <- merged_data %>%
+  filter(Entity %in% top_gii_countries) %>%
+  mutate(GII_scaled = GII * 10) %>%
+  select(Entity, Year, Life_Expectancy_Diff, GII_scaled) %>%
+  pivot_longer(cols = c(Life_Expectancy_Diff, GII_scaled),
+               names_to = "metric", values_to = "value")
+
+
+plot_time <- ggplot(data_long, aes(x = Year, y = value, color = metric)) +
+  geom_line() +
+  facet_wrap(~Entity) +
+  labs(title = "Life Expectancy Gap vs Gender Inequality (Interactive)",
+       y = "Value (GII x10 scaled)", color = "Metric") +
+  theme_minimal()
+
+ggplotly(plot_time)
+```
+
+This chart explores the relationship between Gender Inequality Index (GII) and the life expectancy gap over time for New Guinea and Yemen. Two countries with the highest GII.
+
+Papua New Guinea: GII is high and fluctuating, especially especially after 2015. The life expectancy gap gradually increases (women are living longer than men, by a growing margin). This suggests male health outcomes are worsening despite persistent inequality. 
+
+Yemen: Extremely high GII (very unequal). Life expectancy gap jumps sharply after 2015, peaking around 2018–2019. This is likely due to conflict-related male mortality (civil war), even though GII stays flat.
+
+## Scatterplot: GII vs Life Expectancy Gap
+
+```{r}
+scatter <- merged_data %>%
+  filter(Year == 2019) %>%
+  ggplot(aes(x = GII, y = Life_Expectancy_Diff, text = Entity)) +
+  geom_point(alpha = 0.6, color = "dodgerblue") +
+  labs(title = "Interactive: GII vs Life Expectancy Gap (2019)",
+       x = "Gender Inequality Index",
+       y = "Female - Male Life Expectancy (years)") +
+  theme_minimal()
+
+ggplotly(scatter, tooltip = c("x", "y", "text"))
+```
+
+From looking at there's no strong, consistent pattern. While you'd expect that greater gender inequality (higher GII) might reduce the female advantage in life expectancy, many countries with high GII still show a large gap in favor of women and some low-GII countries (i.e., high gender equality) have smaller or mid-range gaps.
+
+This suggests that gender inequality alone may not be the only factor influencing how long men and women live, at least not universally .
+
+## Scatterplot: Smoking Gap vs Life Expectancy Gap
+
+```{r}
+scatter_smoking <- merged_data %>%
+  filter(Year == 2019) %>%
+  ggplot(aes(x = Smoking_Gap, y = Life_Expectancy_Diff, text = Entity)) +
+  geom_point(alpha = 0.6, color = "darkorange") +
+  labs(title = "Interactive: Smoking Gap vs Life Expectancy Gap (2019)",
+       x = "Male - Female Smoking Rate (%)",
+       y = "Female - Male Life Expectancy (years)") +
+  theme_minimal()
+
+ggplotly(scatter_smoking, tooltip = c("x", "y", "text"))
+
+```
+
+Over here we can see a slightly stronger trend:
+
+Countries where more men smoke compared to women tend to show a larger life expectancy gap (women live longer).
+
+This makes sense: higher male smoking rates → higher male mortality → larger gap.
+
+This plot supports the idea that lifestyle factors like smoking may have a stronger and more direct impact on life expectancy differences than structural indices like GII.
+
+### Conclusion
+
+These two scatterplots compare the life expectancy gap between men and women against two possible drives: gender inequality and smoking. The first chart reveals that higher gender inequality (as measured by GII) does not consistently reduce the female longevity advantage — in fact, many high-GII countries still have large gaps, and so there doesnt seem to be much correlation. In contrast, the second plot shows a clearer positive relationship between smoking habits and life expectancy: in countries where significantly more men smoke, women tend to outlive men by a greater margin. This supports the hypothesis that lifestyle risk factors like smoking may be a stronger contributor to gender differences in life expectancy than institutional gender inequality alone.
+
+## Correlation Heatmap
+
+```{r}
+cor_data <- merged_data %>%
+  select(Life_Expectancy_Diff, GII, Smoking_Gap) %>%
+  cor(use = "complete.obs")
+
+ggcorrplot(cor_data, lab = TRUE, type = "lower", colors = c("blue", "white", "red")) +
+  labs(title = "Correlation Matrix")
+
+```
+
+GII & Life_Expectancy_Diff: −0.3
+
+There is a weak negative correlation between gender inequality (GII) and the life expectancy gap. This means that in countries with higher GII, the female advantage in life expectancy tends to be slightly smaller — though the relationship is not strong.
+
+Smoking_Gap & Life_Expectancy_Diff: 0.20
+
+The smoking gap shows a weak positive correlation with the life expectancy gap. This suggests that in countries where significantly more men smoke than women, the difference in life expectancy tends to be a bit larger.
+
+GII & Smoking_Gap: 0.25
+
+GII and smoking gap also have a weak positive correlation, meaning more unequal countries tend to have larger smoking gaps, though again, the relationship is not especially strong.
+
+These correlations are statistically weak, but they still support the hypothesis that smoking behaviors might play a stronger role than gender inequality in shaping gender-based life expectancy differences.
+
+## World Map Representation
+
+```{r}
+map_2019 <- merged_data %>%
+  filter(Year == 2019)
+
+plot_geo(map_2019) %>%
+  add_trace(
+    z = ~Life_Expectancy_Diff,
+    locations = ~Code,
+    color = ~Life_Expectancy_Diff,
+    text = ~paste(
+      "<b>", Entity, "</b><br>",
+      "Life Expectancy Gap: ", round(Life_Expectancy_Diff, 2), " yrs<br>",
+      "GII: ", round(GII, 2), "<br>",
+      "Smoking (Male): ", round(Smoking_Male, 1), "%<br>",
+      "Smoking (Female): ", round(Smoking_Female, 1), "%<br>",
+      "Smoking Gap: ", round(Smoking_Gap, 1), "%"
+    ),
+    colorscale = "Viridis",
+    type = "choropleth"
+  ) %>%
+  colorbar(title = "Life Gap (yrs)") %>%
+  layout(
+    title = "Interactive World Map: Life Expectancy Gap (2019)",
+    geo = list(showframe = FALSE, projection = list(type = 'natural earth'))
+  )
+```
+
+#### Russia:
+
+One of the highest life expectancy gaps in the world (about 10 years). Despite relatively moderate GII (0.16), the male smoking rate is extremely high (41.5%), with a large smoking gap (28.8%).
+
+Suggests male health behaviors (like smoking) might drive the gender gap more than inequality in this context.
+
+**Central Africa:**
+
+Countries like Nigeria and Togo show small gaps (sometimes under 3 years), even with high GII scores. This highlights that high gender inequality doesn't always reduce female advantage — other health or mortality factors may dominate (like maternal health, conflict, poor access to healthcarecare for both sexes)
+
+## Country Comparison Bar Chart
+
+```{r}
+selected_countries <- c("Ireland", "Greece", "Yemen", "Papua New Guinea")
+
+merged_data %>%
+  filter(Entity %in% selected_countries) %>%
+  ggplot(aes(x = factor(Year), y = Life_Expectancy_Diff, fill = Entity)) +
+  geom_col(position = "dodge") +
+  labs(title = "Life Expectancy Gap Over Time – Selected Countries",
+       x = "Year", y = "Female - Male Life Expectancy (yrs)", fill = "Country") +
+  theme_bw()
+```
+
+This grouped bar chart compares the female/male life expectancy gap across four countries. Each bar shows the life expectancy difference in a given year (2008–2022).
+
+Greece and Ireland
+
+Papua New Guinea and Yemen (countries with high gender inequality)
+
+### **Findings**
+
+Greece: There is a consistently high gap between the 2 genders, but relatively stable over time. This sugests strong public health systems and low male mortality causes 
+
+Ireland: There is a slight downward trend between 2008 and 2016, but then it stabilizes. The life expectancy gap is lower than Greece overall, but still noticeable. 
+
+Papua New Guinea: Steady increase in life expectancy gap over the years. It reaches over 6 years by 2022 and the country is known for very high male smoking rates, poor access to care.
+
+Yemen: Thre is a sharp spike in 2017–2019(nearly 7 years), likely due to civil wars.
+
+Overall, European countries like Greece and Ireland show stable gaps and this is likely influenced by better public health systems and lower smoking disparities.
+
+## Key Countries Time Trend
+
+```{r}
+selected_countries <- c("Russia", "Togo", "Yemen", "Denmark", "Ireland", "Greece")
+custom_colors <- c("Ireland" = "green", "Greece" = "blue", "Russia" = "red",
+                   "Togo" = "purple", "Yemen" = "orange", "Denmark" = "turquoise")
+
+merged_data %>%
+  filter(Entity %in% selected_countries) %>%
+  ggplot(aes(x = factor(Year), y = Life_Expectancy_Diff, fill = Entity)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = custom_colors) +
+  labs(title = "Life Expectancy Gap Over Time – Key Countries",
+       x = "Year", y = "Female - Male Life Expectancy (yrs)", fill = "Country") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+```
+
+Russia: Highest average life expectancy gap 
+
+Togo: Lowest average gap 
+
+Yemen: Highest Gender Inequality Index (GII) 
+
+Denmark: Lowest GII 
+
+Togo: 
+
+-   Extremely small gap (about 1 year), despite having one of the highest GII scores. 
+
+-   This suggests that both male and female life expectancy may be low, leading to a very small gap.  
+
+Denmark: 
+
+-   Low GII, and relatively small, stable gap (about 4 years). 
+
+-   Highlights how gender equality and public health may work together to reduce extreme differences. 
+
+We can conclude countries with similar GII values can show really different life expectancy gaps signifying a low correlation (as shown earlier), while countries with large male smoking gaps tend to have much higher female advantage in lifespan. It supports the idea that a better lifestyle results in a lower gap.
+
+## Global Trend Bar Chart
+
+```{r}
+merged_data %>%
+  group_by(Year) %>%
+  summarise(avg_gap = mean(Life_Expectancy_Diff, na.rm = TRUE)) %>%
+  ggplot(aes(x = Year, y = avg_gap)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Global Life Expectancy Gap Over Time",
+       y = "Avg. Female - Male Gap", x = "Year") +
+  theme_minimal()
+```
+
+The global gap is consistently around 5 years, meaning that, on average, women live 5 years longer than men. There is a small spike in 2020, possibly reflecting early COVID-related male mortality (as studies have shown men were more affected in early stages of the pandemic).
+
+Overall, this chart shows that the global life expectancy gap is remarkably stable — even across significant health, social, and geopolitical changes. However, this global average masks large variations between individual countries as seen in earlier comparisons. 
+
+## **References:**
+
+The datasets were found at:
+
+<https://ourworldindata.org/why-do-women-live-longer-than-men>
+
+<https://ourworldindata.org/grapher/gender-inequality-index-from-the-human-development-report>
+
+<https://ourworldindata.org/who-smokes-more-men-or-women>
